@@ -4,7 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Vendor Upload and Download</title>
-  <script src="https://cdn.jsdelivr.net/npm/@azure/storage-blob@12.18.0/dist/browser/azure-storage-blob.min.js"></script>
+ <script
+  src="https://cdn.jsdelivr.net/npm/@azure/storage-blob@12.18.0/dist/browser/azure-storage-blob.min.js"
+  onerror="(function(){var s=document.createElement('script');s.src='https://unpkg.com/@azure/storage-blob@12.18.0/dist/browser/azure-storage-blob.min.js';document.head.appendChild(s);}())">
+</script>
   <style>
     :root { --pad: 14px; --gap: 10px; }
     body{font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background:#fafafa; color:#111}
@@ -59,7 +62,11 @@
   </div>
 
   <script>
-    const B = azblob; // alias
+    function getSdk() {
+  if (!window.azblob) throw new Error('Azure Blob SDK not loaded');
+  return window.azblob;
+}
+
 
     const $ = (id) => document.getElementById(id);
     const setStatus = (t, isError=false) => {
@@ -118,8 +125,12 @@
     }
 
     function getContainerClient() {
-      const { url } = parseAndValidateUrl();
-      return new B.ContainerClient(url.toString(), B.newPipeline(new B.AnonymousCredential()));
+      function getContainerClient() {
+  const { url } = parseAndValidateUrl();
+  const B = getSdk(); // <— get the SDK safely
+  return new B.ContainerClient(url.toString(), B.newPipeline(new B.AnonymousCredential()));
+}
+
     }
 
     async function listFiles() {
