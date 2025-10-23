@@ -67,34 +67,140 @@
     <ul id="files"></ul>
   </div>
 
-  <script>
-    function getSdk(){
-      if(!window.sdkReady||!window.azblob) throw new Error('Azure Blob SDK not loaded');
-      return window.azblob;
+<script>
+  // ---------- helpers ----------
+  const $ = (id) => document.getElementById(id);
+  const setStatus = (t, isError=false) => {
+    const el = $('status'); el.textContent = t;
+    el.className = 'status' + (isError ? ' error' : '');
+  };
+
+  function parseAndValidateUrl() {
+    const raw = $('sasUrl').value.trim();
+    if (!raw) throw new Error('Paste a container SAS URL');
+    let url; try { url = new URL(raw); } catch { throw new Error('The URL is not valid'); }
+    if (!/\.blob\.core\.windows\.net$/i.test(url.host)) throw new Error('Host must be *.blob.core.windows.net');
+    const path = url.pathname.replace(/^\/+/, '');
+    if (!path) throw new Error('Missing container name');
+    if (path.split('/').length !== 1) throw new Error('Only the container path is allowed');
+    if (!url.search || url.search.length < 10) throw new Error('Missing SAS part');
+    const p = new URLSearchParams(url.search);
+    const sr = p.get('sr') || '';
+    if (sr.toLowerCase() !== 'c') throw new Error('SAS must be container scoped (sr=c)');
+    return { url, qs: url.search, container: path, params: p };
+  }
+
+  function renderSasInfo(info) {
+    const se = info.params.get('se');
+    const si = info.params.get('si');
+    let html = `<strong>Container:</strong> ${info.container}<br>`;
+    html += `<strong>Perms:</strong> <span class="pill">${info.params.get('sp') || (si ? 'policy: '+si : 'unknown')}</span>`;
+    if (se) html += `<br><strong>Expires (UTC):</strong> ${se}`;
+    $('sasInfo').innerHTML = html;
+  }
+
+  // ---------- LIST using fetch (XML) ----------
+  async function listFiles() {
+    try {
+      setStatus('Listing files…');
+      const info = parseAndValidateUrl();
+      renderSasInfo(info);
+
+      // GET container list
+      const listUrl = `${info.url.origin}/${info.container}?restype=container&comp=list${info.qs}`;
+      const res = await fetch(listUrl, { method: 'GET' });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(`List failed (${res.status}). ${msg}`);
+      }
+      const text = await res.text();
+      // Simple XML parse
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(text, 'application/xml');
+      const names = Array.from(xml.getElementsByTagName('Name')).map(n => n.textContent);
+
+      const ul = $('files'); ul.innerHTML = '';
+      if (names.length === 0) {
+        ul.innerHTML = '<li class="muted">No files in this container</li>';
+      } else {
+        const base = `${info.url.origin}/${info.container}`;
+        for (const name of names) {
+          const li = document.createElement('li');
+          const a  = document.createElement('a');
+          a.textContent = name;
+          a.href = `${base}/${encodeURIComponent(name)}${info.qs}`;
+          a.setAttribute('download', name);
+          li.appendChild(a);
+          ul.appendChild(li);
+        }
+      }
+      setStatus('Done');
+    } catch (e) {
+      setStatus(e.message || 'Failed to list files', true);
+      console.error(e);
     }
-    const $ = (id)=>document.getElementById(id);
-    const setStatus=(t,e=false)=>{const el=$('status');el.textContent=t;el.className='status'+(e?' error':'');};
+  }
 
-    function parseAndValidateUrl(){
-      const raw=$('sasUrl').value.trim();
-      if(!raw) throw new Error('Paste a container SAS URL');
-      let url;try{url=new URL(raw);}catch{throw new Error('The URL is not valid');}
-      if(!/\.blob\.core\.windows\.net$/i.test(url.host)) throw new Error('Host must be *.blob.core.windows.net');
-      const path=url.pathname.replace(/^\/+/,'');
-      if(!path) throw new Error('Missing container name');
-      if(path.split('/').length!==1) throw new Error('Only container path allowed');
-      if(!url.search||url.search.length<10) throw new Error('Missing SAS');
-      const p=new URLSearchParams(url.search);const sp=p.get('sp')||'';const sr=p.get('sr')||'';if(sr.toLowerCase()!=='c') throw new Error('SAS must be container scoped (sr=c)');return{url,sp,p};
+  // ---------- UPLOAD using fetch (single PUT BlockBlob) ----------
+  async function uploadFile() {
+    try {
+      const file = $('fileInput').files[0];
+      if (!file) return setStatus('Choose a file', true);
+      if (file.size > 30 * 1024 * 1024) return setStatus('Max size is 30 MB', true);
+
+      const info = parseAndValidateUrl();
+      // We accept either explicit sp perms (rlacw) or policy SAS (si=...)
+      const sp = (info.params.get('sp') || '').toLowerCase();
+      const viaPolicy = !!info.params.get('si');
+      const need = ['r','l','a','c','w'];
+      const hasAll = need.every(x => sp.includes(x));
+      if (!hasAll && !viaPolicy) {
+        return setStatus('SAS needs r l a c w or must be a policy SAS', true);
+      }
+
+      setStatus('Uploading…');
+      const blobUrl = `${info.url.origin}/${info.container}/${encodeURIComponent(file.name)}${info.qs}`;
+      const res = await fetch(blobUrl, {
+        method: 'PUT',
+        headers: {
+          'x-ms-blob-type': 'BlockBlob',
+          // Optional but helps with some proxies:
+          'x-ms-version': '2023-08-03',
+          'Content-Type': file.type || 'application/octet-stream'
+        },
+        body: file
+      });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(`Upload failed (${res.status}). ${msg}`);
+      }
+      setStatus('Upload complete');
+      await listFiles();
+    } catch (e) {
+      setStatus(e.message || 'Upload failed', true);
+      console.error(e);
     }
+  }
 
-    function getClient(){const{url}=parseAndValidateUrl();const B=getSdk();return new B.ContainerClient(url.toString(),B.newPipeline(new B.AnonymousCredential()));}
+  // Buttons
+  document.getElementById('btnList').onclick   = () => { try { listFiles(); } catch (e) { setStatus(e.message, true); } };
+  document.getElementById('btnUpload').onclick = () => { try { uploadFile(); } catch (e) { setStatus(e.message, true); } };
 
-    async function listFiles(){try{setStatus('Listing files…');const info=parseAndValidateUrl();const B=getSdk();const c=getClient();const ul=$('files');ul.innerHTML='';let count=0;for await(const item of c.listBlobsFlat()){count++;const li=document.createElement('li');li.textContent=item.name;ul.appendChild(li);}if(count===0){ul.innerHTML='<li class="muted">No files</li>'; }setStatus('Done');}catch(e){setStatus(e.message,true);}}
+  // Copy / paste helpers
+  document.getElementById('btnCopy').onclick  = async () => {
+    try { await navigator.clipboard.writeText($('sasUrl').value.trim()); setStatus('Copied'); }
+    catch { setStatus('Copy failed', true); }
+  };
+  document.getElementById('btnPaste').onclick = async () => {
+    try { const t = await navigator.clipboard.readText(); $('sasUrl').value = t.trim(); setStatus('Pasted'); }
+    catch { setStatus('Could not read clipboard', true); }
+  };
 
-    async function uploadFile(){try{const f=$('fileInput').files[0];if(!f) return setStatus('Choose a file',true);if(f.size>30*1024*1024) return setStatus('Max 30 MB',true);setStatus('Uploading…');const B=getSdk();const c=getClient();await c.getBlockBlobClient(f.name).uploadData(f,{blobHTTPHeaders:{blobContentType:f.type||'application/octet-stream'}});setStatus('Upload complete');await listFiles();}catch(e){setStatus(e.message,true);}}
-
-    $('btnList').onclick=()=>{try{listFiles();}catch(e){setStatus(e.message,true);}};
-    $('btnUpload').onclick=()=>{try{uploadFile();}catch(e){setStatus(e.message,true);}};
-  </script>
+  // Parse on change to show info panel
+  $('sasUrl').addEventListener('change', () => {
+    try { const info = parseAndValidateUrl(); renderSasInfo(info); setStatus('SAS looks good'); }
+    catch (e) { setStatus(e.message, true); }
+  });
+</script>
 </body>
 </html>
