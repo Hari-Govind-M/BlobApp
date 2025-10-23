@@ -1,96 +1,202 @@
 <!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Vendor Uploader</title>
-    <style>
-      body{font-family:system-ui,Arial;margin:24px}
-      .row{margin:12px 0}
-      button,input{padding:8px 12px}
-      ul{padding-left:18px}
-      li{margin:6px 0}
-      .muted{color:#666;font-size:12px}
-    </style>
-    <script src="https://cdn.jsdelivr.net/npm/@azure/storage-blob@12.18.0/dist/browser/azure-storage-blob.min.js"></script>
-  </head>
-  <body>
-    <h2>Upload and Download</h2>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vendor Upload and Download</title>
+  <script src="https://cdn.jsdelivr.net/npm/@azure/storage-blob@12.18.0/dist/browser/azure-storage-blob.min.js"></script>
+  <style>
+    :root { --pad: 14px; --gap: 10px; }
+    body{font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background:#fafafa; color:#111}
+    .wrap{max-width: 860px; margin: 32px auto; background:#fff; padding: 24px; border-radius: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.06)}
+    h1{margin:0 0 6px 0; font-size: 22px}
+    .sub{color:#666; font-size: 13px; margin-bottom: 18px}
+    .row{display:flex; gap:var(--gap); align-items:center; flex-wrap:wrap; margin: 10px 0}
+    input[type=text]{flex:1; min-width: 320px; padding: var(--pad); border-radius: 10px; border:1px solid #dadada; outline:none}
+    input[type=file]{padding: 6px}
+    button{padding: 10px 14px; border:1px solid #e0e0e0; background:#0b5fff; color:#fff; border-radius: 10px; cursor:pointer}
+    button.secondary{background:#fff; color:#0b5fff; border-color:#bcd}
+    button:disabled{opacity:.5; cursor:not-allowed}
+    .muted{color:#666; font-size: 12px}
+    .status{margin-top:10px; padding:10px; background:#f6f7ff; border:1px solid #e6e8ff; color:#222; border-radius:10px}
+    .error{background:#fff5f5; border-color:#ffd6d6; color:#9b1c1c}
+    ul{list-style: none; padding: 0; margin: 0}
+    li{display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f1f1f1}
+    a{color:#0b5fff; text-decoration:none}
+    .right{display:flex; gap:8px; align-items:center}
+    .pill{font-size: 12px; color:#444; background:#f0f2f7; padding:4px 8px; border-radius: 999px}
+    .grid{display:grid; grid-template-columns: 1fr; gap:12px}
+    @media(min-width:760px){ .grid{grid-template-columns: 1fr 1fr} }
+    .kbd{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#f3f3f3; padding:2px 6px; border-radius:6px; border:1px solid #e7e7e7}
+    .small{font-size: 12px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Vendor upload and download</h1>
+    <div class="sub">Paste your <span class="kbd">container SAS URL</span> below. You can then list files and upload files up to 30 MB. No delete.</div>
 
     <div class="row">
-      <label>Container SAS URL</label><br />
-      <input id="sasUrl" size="100" placeholder="Paste container SAS URL here" />
-      <div class="muted">Format: https://account.blob.core.windows.net/vendorX?<i>SAS</i></div>
+      <input id="sasUrl" type="text" placeholder="https://<account>.blob.core.windows.net/<container>?<sas>" />
+      <button id="btnPaste" class="secondary" title="Paste from clipboard">Paste</button>
+      <button id="btnCopy" class="secondary" title="Copy to clipboard">Copy</button>
+    </div>
+
+    <div class="grid">
+      <div class="status" id="status">Idle</div>
+      <div class="status" id="sasInfo">No SAS info yet</div>
     </div>
 
     <div class="row">
       <button id="btnList">List files</button>
-      <input type="file" id="fileInput" />
+      <input id="fileInput" type="file" />
       <button id="btnUpload">Upload</button>
     </div>
-
-    <div class="row"><strong>Status:</strong> <span id="status">Idle</span></div>
+    <div class="muted small">Tip: the URL must include the container name and the SAS. Example: <span class="kbd">https://contoso.blob.core.windows.net/vendor1?sp=rlawc&sr=c&...</span></div>
 
     <h3>Files</h3>
     <ul id="files"></ul>
+  </div>
 
-    <script>
-      const { ContainerClient, AnonymousCredential, newPipeline, StorageSharedKeyCredential } = azblob;
+  <script>
+    const B = azblob; // alias
 
-      const status = (t) => document.getElementById('status').textContent = t;
+    const $ = (id) => document.getElementById(id);
+    const setStatus = (t, isError=false) => {
+      const el = $('status'); el.textContent = t; el.className = 'status' + (isError ? ' error' : '');
+    };
 
-      function getContainerClient() {
-        const sasUrl = document.getElementById('sasUrl').value.trim();
-        if (!sasUrl) throw new Error('Paste your container SAS URL');
-        return new azblob.ContainerClient(sasUrl, azblob.newPipeline(new azblob.AnonymousCredential()));
+    function parseAndValidateUrl() {
+      const raw = $('sasUrl').value.trim();
+      if (!raw) throw new Error('Paste a container SAS URL');
+      let url; try { url = new URL(raw); } catch { throw new Error('The URL is not valid'); }
+      if (!/\.blob\.core\.windows\.net$/i.test(url.host)) throw new Error('The host must be *.blob.core.windows.net');
+      const path = url.pathname.replace(/^\/+/, '');
+      if (!path) throw new Error('The container name is missing in the path');
+      if (path.split('/').length !== 1) throw new Error('Only the container path is allowed');
+      if (!url.search || url.search.length < 10) throw new Error('The SAS part is missing');
+      const p = new URLSearchParams(url.search);
+      const sp = p.get('sp') || '';
+      const sr = p.get('sr') || '';
+      if (sr.toLowerCase() !== 'c') throw new Error('SAS must be container scoped (sr=c)');
+      return { url, sp, p };
+    }
+
+    function renderSasInfo(url, sp, params) {
+      const se = params.get('se'); // expiry in UTC
+      const container = url.pathname.replace(/^\/+/, '');
+      let html = `<strong>Container:</strong> ${container}<br>`;
+      html += `<strong>Perms:</strong> <span class="pill">${sp || 'unknown'}</span>`;
+      if (se) {
+        html += `<br><strong>Expires (UTC):</strong> ${se}`;
+        startCountdown(se);
+      } else {
+        $('sasInfo').textContent = 'SAS has no se parameter. Please check.';
+        return;
       }
+      $('sasInfo').innerHTML = html;
+    }
 
-      async function listFiles() {
-        try {
-          status('Listing...');
-          const client = getContainerClient();
-          const ul = document.getElementById('files');
-          ul.innerHTML = '';
-          for await (const item of client.listBlobsFlat()) {
-            const li = document.createElement('li');
-            const a = document.createElement('a');
-            a.textContent = item.name;
-            // Build a blob SAS URL by appending the same container SAS query
-            const qs = new URL(client.url).search;
-            a.href = `${client.url.split('?')[0]}/${encodeURIComponent(item.name)}${qs}`;
-            a.download = item.name;
-            li.appendChild(a);
-            ul.appendChild(li);
-          }
-          status('Done');
-        } catch (e) {
-          status('Error listing files');
-          alert(e.message);
+    let countdownTimer;
+    function startCountdown(se) {
+      clearInterval(countdownTimer);
+      const out = $('sasInfo');
+      function tick() {
+        const end = Date.parse(se);
+        const now = Date.now();
+        const ms = end - now;
+        if (isNaN(end)) return; // no change
+        if (ms <= 0) {
+          out.innerHTML += '<br><span class="pill" style="background:#ffecec;color:#a40000">SAS expired</span>';
+          clearInterval(countdownTimer); return;
         }
+        const h = Math.floor(ms/36e5), m = Math.floor(ms%36e5/6e4), s = Math.floor(ms%6e4/1e3);
+        const base = out.innerHTML.replace(/<br><strong>Time left:[\s\S]*$/,'');
+        out.innerHTML = base + `<br><strong>Time left:</strong> ${h}h ${m}m ${s}s`;
       }
+      tick(); countdownTimer = setInterval(tick, 1000);
+    }
 
-      async function uploadFile() {
-        try {
-          const file = document.getElementById('fileInput').files[0];
-          if (!file) return alert('Choose a file');
-          if (file.size > 30 * 1024 * 1024) return alert('Max 30 MB');
+    function getContainerClient() {
+      const { url } = parseAndValidateUrl();
+      return new B.ContainerClient(url.toString(), B.newPipeline(new B.AnonymousCredential()));
+    }
 
-          status('Uploading...');
-          const client = getContainerClient();
-          const blockClient = client.getBlockBlobClient(file.name);
-          await blockClient.uploadData(file, {
-            blobHTTPHeaders: { blobContentType: file.type || 'application/octet-stream' },
-          });
-          status('Upload done');
-          await listFiles();
-        } catch (e) {
-          status('Error uploading');
-          alert(e.message);
+    async function listFiles() {
+      try {
+        setStatus('Listing files…');
+        const info = parseAndValidateUrl();
+        renderSasInfo(info.url, info.sp, info.p);
+        const client = getContainerClient();
+        const ul = $('files'); ul.innerHTML='';
+        let count = 0;
+        for await (const item of client.listBlobsFlat()) {
+          count++;
+          const li = document.createElement('li');
+          const left = document.createElement('div');
+          const right = document.createElement('div'); right.className='right';
+          const a = document.createElement('a');
+          const qs = new URL(client.url).search;
+          a.textContent = item.name;
+          a.href = `${client.url.split('?')[0]}/${encodeURIComponent(item.name)}${qs}`;
+          a.setAttribute('download', item.name);
+          left.appendChild(a);
+          const sizeKb = item.properties?.contentLength ? Math.round(item.properties.contentLength/1024) : 0;
+          const size = document.createElement('span'); size.className='pill'; size.textContent = sizeKb ? `${sizeKb} KB` : '—';
+          right.appendChild(size);
+          li.appendChild(left); li.appendChild(right); ul.appendChild(li);
         }
+        if (count===0){ $('files').innerHTML = '<li class="muted">No files in this container</li>'; }
+        setStatus('Done');
+      } catch (e) {
+        setStatus(e.message || 'Failed to list files', true);
+        console.error(e);
       }
+    }
 
-      document.getElementById('btnList').onclick = listFiles;
-      document.getElementById('btnUpload').onclick = uploadFile;
-    </script>
-  </body>
+    async function uploadFile() {
+      try {
+        const file = $('fileInput').files[0];
+        if (!file) return setStatus('Choose a file first', true);
+        if (file.size > 30*1024*1024) return setStatus('Max size is 30 MB', true);
+
+        const info = parseAndValidateUrl();
+        // Check write perms
+        const need = ['r','l','a','c','w'];
+        const hasAll = need.every(x => (info.sp||'').includes(x));
+        if (!hasAll) {
+          return setStatus('SAS needs r l a c w to upload', true);
+        }
+
+        setStatus('Uploading…');
+        const client = getContainerClient();
+        const blob = client.getBlockBlobClient(file.name);
+        await blob.uploadData(file, { blobHTTPHeaders: { blobContentType: file.type || 'application/octet-stream' } });
+        setStatus('Upload complete');
+        await listFiles();
+      } catch (e) {
+        setStatus(e.message || 'Upload failed', true);
+        console.error(e);
+      }
+    }
+
+    // Buttons
+    $('btnList').onclick = listFiles;
+    $('btnUpload').onclick = uploadFile;
+    $('btnCopy').onclick = async () => {
+      try { await navigator.clipboard.writeText($('sasUrl').value.trim()); setStatus('Copied'); }
+      catch { setStatus('Copy failed', true); }
+    };
+    $('btnPaste').onclick = async () => {
+      try { const t = await navigator.clipboard.readText(); $('sasUrl').value = t.trim(); setStatus('Pasted'); }
+      catch { setStatus('Could not read clipboard', true); }
+    };
+
+    // Improve UX: auto-parse on paste in the input
+    $('sasUrl').addEventListener('change', () => {
+      try { const { url, sp, p } = parseAndValidateUrl(); renderSasInfo(url, sp, p); setStatus('SAS looks good'); }
+      catch(e){ setStatus(e.message, true); }
+    });
+  </script>
+</body>
 </html>
