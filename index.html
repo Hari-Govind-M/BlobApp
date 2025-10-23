@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Vendor Uploader</title>
+    <style>
+      body{font-family:system-ui,Arial;margin:24px}
+      .row{margin:12px 0}
+      button,input{padding:8px 12px}
+      ul{padding-left:18px}
+      li{margin:6px 0}
+      .muted{color:#666;font-size:12px}
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@azure/storage-blob@12.18.0/dist/browser/azure-storage-blob.min.js"></script>
+  </head>
+  <body>
+    <h2>Upload and Download</h2>
+
+    <div class="row">
+      <label>Container SAS URL</label><br />
+      <input id="sasUrl" size="100" placeholder="Paste container SAS URL here" />
+      <div class="muted">Format: https://account.blob.core.windows.net/vendorX?<i>SAS</i></div>
+    </div>
+
+    <div class="row">
+      <button id="btnList">List files</button>
+      <input type="file" id="fileInput" />
+      <button id="btnUpload">Upload</button>
+    </div>
+
+    <div class="row"><strong>Status:</strong> <span id="status">Idle</span></div>
+
+    <h3>Files</h3>
+    <ul id="files"></ul>
+
+    <script>
+      const { ContainerClient, AnonymousCredential, newPipeline, StorageSharedKeyCredential } = azblob;
+
+      const status = (t) => document.getElementById('status').textContent = t;
+
+      function getContainerClient() {
+        const sasUrl = document.getElementById('sasUrl').value.trim();
+        if (!sasUrl) throw new Error('Paste your container SAS URL');
+        return new azblob.ContainerClient(sasUrl, azblob.newPipeline(new azblob.AnonymousCredential()));
+      }
+
+      async function listFiles() {
+        try {
+          status('Listing...');
+          const client = getContainerClient();
+          const ul = document.getElementById('files');
+          ul.innerHTML = '';
+          for await (const item of client.listBlobsFlat()) {
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.textContent = item.name;
+            // Build a blob SAS URL by appending the same container SAS query
+            const qs = new URL(client.url).search;
+            a.href = `${client.url.split('?')[0]}/${encodeURIComponent(item.name)}${qs}`;
+            a.download = item.name;
+            li.appendChild(a);
+            ul.appendChild(li);
+          }
+          status('Done');
+        } catch (e) {
+          status('Error listing files');
+          alert(e.message);
+        }
+      }
+
+      async function uploadFile() {
+        try {
+          const file = document.getElementById('fileInput').files[0];
+          if (!file) return alert('Choose a file');
+          if (file.size > 30 * 1024 * 1024) return alert('Max 30 MB');
+
+          status('Uploading...');
+          const client = getContainerClient();
+          const blockClient = client.getBlockBlobClient(file.name);
+          await blockClient.uploadData(file, {
+            blobHTTPHeaders: { blobContentType: file.type || 'application/octet-stream' },
+          });
+          status('Upload done');
+          await listFiles();
+        } catch (e) {
+          status('Error uploading');
+          alert(e.message);
+        }
+      }
+
+      document.getElementById('btnList').onclick = listFiles;
+      document.getElementById('btnUpload').onclick = uploadFile;
+    </script>
+  </body>
+</html>
