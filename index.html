@@ -107,7 +107,8 @@
       renderSasInfo(info);
 
       // GET container list
-      const listUrl = `${info.url.origin}/${info.container}?restype=container&comp=list${info.qs}`;
+      const listUrl = `${info.url.origin}/${info.container}${info.qs}&restype=container&comp=list`;
+
       const res = await fetch(listUrl, { method: 'GET' });
       if (!res.ok) {
         const msg = await res.text();
