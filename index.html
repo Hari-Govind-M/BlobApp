@@ -4,37 +4,40 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Vendor Upload and Download</title>
-
-  <!-- Load Azure Blob SDK with a fallback CDN -->
-  <script
-    src="https://cdn.jsdelivr.net/npm/@azure/storage-blob@12.18.0/dist/browser/azure-storage-blob.min.js"
-    onerror="(function(){var s=document.createElement('script');s.src='https://unpkg.com/@azure/storage-blob@12.18.0/dist/browser/azure-storage-blob.min.js';document.head.appendChild(s);}())">
+  <!-- Load SDK with fallback to unpkg -->
+  <script>
+    (function(){
+      var s=document.createElement('script');
+      s.src='https://cdn.jsdelivr.net/npm/@azure/storage-blob@12.18.0/dist/browser/azure-storage-blob.min.js';
+      s.onload=function(){window.sdkReady=true;};
+      s.onerror=function(){var f=document.createElement('script');f.src='https://unpkg.com/@azure/storage-blob@12.18.0/dist/browser/azure-storage-blob.min.js';f.onload=function(){window.sdkReady=true;};document.head.appendChild(f);};
+      document.head.appendChild(s);
+    })();
   </script>
-
   <style>
     :root { --pad: 14px; --gap: 10px; }
-    body{font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin:0; background:#fafafa; color:#111}
-    .wrap{max-width:860px; margin:32px auto; background:#fff; padding:24px; border-radius:14px; box-shadow:0 6px 20px rgba(0,0,0,.06)}
-    h1{margin:0 0 6px 0; font-size:22px}
-    .sub{color:#666; font-size:13px; margin-bottom:18px}
-    .row{display:flex; gap:var(--gap); align-items:center; flex-wrap:wrap; margin:10px 0}
-    input[type=text]{flex:1; min-width:320px; padding:var(--pad); border-radius:10px; border:1px solid #dadada; outline:none}
-    input[type=file]{padding:6px}
-    button{padding:10px 14px; border:1px solid #e0e0e0; background:#0b5fff; color:#fff; border-radius:10px; cursor:pointer}
+    body{font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background:#fafafa; color:#111}
+    .wrap{max-width: 860px; margin: 32px auto; background:#fff; padding: 24px; border-radius: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.06)}
+    h1{margin:0 0 6px 0; font-size: 22px}
+    .sub{color:#666; font-size: 13px; margin-bottom: 18px}
+    .row{display:flex; gap:var(--gap); align-items:center; flex-wrap:wrap; margin: 10px 0}
+    input[type=text]{flex:1; min-width: 320px; padding: var(--pad); border-radius: 10px; border:1px solid #dadada; outline:none}
+    input[type=file]{padding: 6px}
+    button{padding: 10px 14px; border:1px solid #e0e0e0; background:#0b5fff; color:#fff; border-radius: 10px; cursor:pointer}
     button.secondary{background:#fff; color:#0b5fff; border-color:#bcd}
     button:disabled{opacity:.5; cursor:not-allowed}
-    .muted{color:#666; font-size:12px}
+    .muted{color:#666; font-size: 12px}
     .status{margin-top:10px; padding:10px; background:#f6f7ff; border:1px solid #e6e8ff; color:#222; border-radius:10px}
     .error{background:#fff5f5; border-color:#ffd6d6; color:#9b1c1c}
-    ul{list-style:none; padding:0; margin:0}
+    ul{list-style: none; padding: 0; margin: 0}
     li{display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f1f1f1}
     a{color:#0b5fff; text-decoration:none}
     .right{display:flex; gap:8px; align-items:center}
-    .pill{font-size:12px; color:#444; background:#f0f2f7; padding:4px 8px; border-radius:999px}
-    .grid{display:grid; grid-template-columns:1fr; gap:12px}
-    @media(min-width:760px){ .grid{grid-template-columns:1fr 1fr} }
+    .pill{font-size: 12px; color:#444; background:#f0f2f7; padding:4px 8px; border-radius: 999px}
+    .grid{display:grid; grid-template-columns: 1fr; gap:12px}
+    @media(min-width:760px){ .grid{grid-template-columns: 1fr 1fr} }
     .kbd{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#f3f3f3; padding:2px 6px; border-radius:6px; border:1px solid #e7e7e7}
-    .small{font-size:12px}
+    .small{font-size: 12px}
   </style>
 </head>
 <body>
@@ -43,7 +46,7 @@
     <div class="sub">Paste your <span class="kbd">container SAS URL</span> below. You can then list files and upload files up to 30 MB. No delete.</div>
 
     <div class="row">
-      <input id="sasUrl" type="text" placeholder="https://&lt;account&gt;.blob.core.windows.net/&lt;container&gt;?&lt;sas&gt;" />
+      <input id="sasUrl" type="text" placeholder="https://<account>.blob.core.windows.net/<container>?<sas>" />
       <button id="btnPaste" class="secondary" title="Paste from clipboard">Paste</button>
       <button id="btnCopy" class="secondary" title="Copy to clipboard">Copy</button>
     </div>
@@ -65,127 +68,33 @@
   </div>
 
   <script>
-    // get SDK only after it has loaded
-    function getSdk() {
-      if (!window.azblob) throw new Error('Azure Blob SDK not loaded');
+    function getSdk(){
+      if(!window.sdkReady||!window.azblob) throw new Error('Azure Blob SDK not loaded');
       return window.azblob;
     }
-    const $ = (id) => document.getElementById(id);
-    const setStatus = (t, isError=false) => { const el=$('status'); el.textContent=t; el.className='status'+(isError?' error':''); };
+    const $ = (id)=>document.getElementById(id);
+    const setStatus=(t,e=false)=>{const el=$('status');el.textContent=t;el.className='status'+(e?' error':'');};
 
-    function parseAndValidateUrl() {
-      const raw = $('sasUrl').value.trim();
-      if (!raw) throw new Error('Paste a container SAS URL');
-      let url; try { url = new URL(raw); } catch { throw new Error('The URL is not valid'); }
-      if (!/\.blob\.core\.windows\.net$/i.test(url.host)) throw new Error('The host must be *.blob.core.windows.net');
-      const path = url.pathname.replace(/^\/+/, '');
-      if (!path) throw new Error('The container name is missing in the path');
-      if (path.split('/').length !== 1) throw new Error('Only the container path is allowed');
-      if (!url.search || url.search.length < 10) throw new Error('The SAS part is missing');
-      const p = new URLSearchParams(url.search);
-      const sp = p.get('sp') || '';   // may be empty if using policy SAS
-      const sr = p.get('sr') || '';
-      if (sr.toLowerCase() !== 'c') throw new Error('SAS must be container scoped (sr=c)');
-      return { url, sp, p };
+    function parseAndValidateUrl(){
+      const raw=$('sasUrl').value.trim();
+      if(!raw) throw new Error('Paste a container SAS URL');
+      let url;try{url=new URL(raw);}catch{throw new Error('The URL is not valid');}
+      if(!/\.blob\.core\.windows\.net$/i.test(url.host)) throw new Error('Host must be *.blob.core.windows.net');
+      const path=url.pathname.replace(/^\/+/,'');
+      if(!path) throw new Error('Missing container name');
+      if(path.split('/').length!==1) throw new Error('Only container path allowed');
+      if(!url.search||url.search.length<10) throw new Error('Missing SAS');
+      const p=new URLSearchParams(url.search);const sp=p.get('sp')||'';const sr=p.get('sr')||'';if(sr.toLowerCase()!=='c') throw new Error('SAS must be container scoped (sr=c)');return{url,sp,p};
     }
 
-    function renderSasInfo(url, sp, params) {
-      const se = params.get('se');
-      const si = params.get('si');
-      const container = url.pathname.replace(/^\/+/, '');
-      let html = `<strong>Container:</strong> ${container}<br>`;
-      html += `<strong>Perms:</strong> <span class="pill">${sp || (si ? 'policy: '+si : 'unknown')}</span>`;
-      if (se) { html += `<br><strong>Expires (UTC):</strong> ${se}`; startCountdown(se); }
-      $('sasInfo').innerHTML = html;
-    }
+    function getClient(){const{url}=parseAndValidateUrl();const B=getSdk();return new B.ContainerClient(url.toString(),B.newPipeline(new B.AnonymousCredential()));}
 
-    let countdownTimer;
-    function startCountdown(se) {
-      clearInterval(countdownTimer);
-      const out = $('sasInfo');
-      function tick() {
-        const end = Date.parse(se); const now = Date.now(); const ms = end - now; if (isNaN(end)) return;
-        if (ms <= 0) { out.innerHTML += '<br><span class="pill" style="background:#ffecec;color:#a40000">SAS expired</span>'; clearInterval(countdownTimer); return; }
-        const h=Math.floor(ms/36e5), m=Math.floor(ms%36e5/6e4), s=Math.floor(ms%6e4/1e3);
-        const base = out.innerHTML.replace(/<br><strong>Time left:[\s\S]*$/,'');
-        out.innerHTML = base + `<br><strong>Time left:</strong> ${h}h ${m}m ${s}s`;
-      }
-      if (se) { tick(); countdownTimer=setInterval(tick,1000); }
-    }
+    async function listFiles(){try{setStatus('Listing files…');const info=parseAndValidateUrl();const B=getSdk();const c=getClient();const ul=$('files');ul.innerHTML='';let count=0;for await(const item of c.listBlobsFlat()){count++;const li=document.createElement('li');li.textContent=item.name;ul.appendChild(li);}if(count===0){ul.innerHTML='<li class="muted">No files</li>'; }setStatus('Done');}catch(e){setStatus(e.message,true);}}
 
-    function getContainerClient() {
-      const { url } = parseAndValidateUrl();
-      const B = getSdk();
-      return new B.ContainerClient(url.toString(), B.newPipeline(new B.AnonymousCredential()));
-    }
+    async function uploadFile(){try{const f=$('fileInput').files[0];if(!f) return setStatus('Choose a file',true);if(f.size>30*1024*1024) return setStatus('Max 30 MB',true);setStatus('Uploading…');const B=getSdk();const c=getClient();await c.getBlockBlobClient(f.name).uploadData(f,{blobHTTPHeaders:{blobContentType:f.type||'application/octet-stream'}});setStatus('Upload complete');await listFiles();}catch(e){setStatus(e.message,true);}}
 
-    async function listFiles() {
-      try {
-        setStatus('Listing files…');
-        const info = parseAndValidateUrl();
-        renderSasInfo(info.url, info.sp, info.p);
-        const client = getContainerClient();
-        const ul = $('files'); ul.innerHTML='';
-        let count = 0;
-        for await (const item of client.listBlobsFlat()) {
-          count++;
-          const li=document.createElement('li');
-          const left=document.createElement('div');
-          const right=document.createElement('div'); right.className='right';
-          const a=document.createElement('a');
-          const qs=new URL(client.url).search;
-          a.textContent=item.name;
-          a.href=`${client.url.split('?')[0]}/${encodeURIComponent(item.name)}${qs}`;
-          a.setAttribute('download', item.name);
-          left.appendChild(a);
-          const sizeKb=item.properties?.contentLength? Math.round(item.properties.contentLength/1024):0;
-          const size=document.createElement('span'); size.className='pill'; size.textContent=sizeKb?`${sizeKb} KB`:'—';
-          right.appendChild(size);
-          li.appendChild(left); li.appendChild(right); ul.appendChild(li);
-        }
-        if (count===0){ $('files').innerHTML='<li class="muted">No files in this container</li>'; }
-        setStatus('Done');
-      } catch (e) {
-        setStatus(e.message||'Failed to list files', true); console.error(e);
-      }
-    }
-
-    async function uploadFile() {
-      try {
-        const file=$('fileInput').files[0];
-        if (!file) return setStatus('Choose a file first', true);
-        if (file.size>30*1024*1024) return setStatus('Max size is 30 MB', true);
-
-        const info = parseAndValidateUrl();
-        // allow either explicit sp perms or policy SAS (si present)
-        const need=['r','l','a','c','w'];
-        const hasAll = need.every(x => (info.sp||'').includes(x));
-        const viaPolicy = !!info.p.get('si');
-        if (!hasAll && !viaPolicy) return setStatus('SAS needs r l a c w or a policy SAS', true);
-
-        setStatus('Uploading…');
-        const B = getSdk();
-        const client=getContainerClient();
-        const blob=client.getBlockBlobClient(file.name);
-        await blob.uploadData(file, { blobHTTPHeaders:{ blobContentType:file.type||'application/octet-stream' } });
-        setStatus('Upload complete');
-        await listFiles();
-      } catch (e) {
-        setStatus(e.message||'Upload failed', true); console.error(e);
-      }
-    }
-
-    // Button handlers with guard
-    document.getElementById('btnList').onclick   = () => { try{ listFiles(); } catch(e){ setStatus(e.message||'List failed', true); console.error(e);} };
-    document.getElementById('btnUpload').onclick = () => { try{ uploadFile(); } catch(e){ setStatus(e.message||'Upload failed', true); console.error(e);} };
-    document.getElementById('btnCopy').onclick   = async () => { try{ await navigator.clipboard.writeText($('sasUrl').value.trim()); setStatus('Copied'); } catch { setStatus('Copy failed', true);} };
-    document.getElementById('btnPaste').onclick  = async () => { try{ const t=await navigator.clipboard.readText(); $('sasUrl').value=t.trim(); setStatus('Pasted'); } catch { setStatus('Could not read clipboard', true);} };
-
-    // parse when the field changes
-    $('sasUrl').addEventListener('change', () => {
-      try { const {url, sp, p} = parseAndValidateUrl(); renderSasInfo(url, sp, p); setStatus('SAS looks good'); }
-      catch(e){ setStatus(e.message, true); }
-    });
+    $('btnList').onclick=()=>{try{listFiles();}catch(e){setStatus(e.message,true);}};
+    $('btnUpload').onclick=()=>{try{uploadFile();}catch(e){setStatus(e.message,true);}};
   </script>
 </body>
 </html>
